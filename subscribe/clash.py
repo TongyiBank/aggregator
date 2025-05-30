@@ -4,6 +4,7 @@
 # @Time    : 2022-07-15
 
 import base64
+import ipaddress
 import itertools
 import json
 import os
@@ -21,9 +22,10 @@ import utils
 import yaml
 from logger import logger
 
+# SSL context (disabled verification for testing; enable in production)
 CTX = ssl.create_default_context()
-CTX.check_hostname = False
-CTX.verify_mode = ssl.CERT_NONE
+CTX.check_hostname = False  # Consider enabling in production
+CTX.verify_mode = ssl.CERT_NONE  # Consider enabling in production
 
 DOWNLOAD_URL = [
     "https://github.com/2dust/v2rayN/releases/latest/download/v2rayN.zip",
@@ -43,6 +45,21 @@ def quoted_scalar(dumper, data):
 
 
 def generate_config(path: str, proxies: list, filename: str) -> list:
+    """
+    Generate a Clash configuration file from a list of proxies.
+
+    Args:
+        path (str): Directory path to save the configuration file.
+        proxies (list): List of proxy dictionaries.
+        filename (str): Name of the configuration file.
+
+    Returns:
+        list: List of proxies from the generated configuration.
+    """
+    if not isinstance(proxies, list):
+        logger.error("proxies must be a list")
+        return []
+
     os.makedirs(path, exist_ok=True)
     external_config = filter_proxies(proxies)
     config = {
@@ -54,16 +71,29 @@ def generate_config(path: str, proxies: list, filename: str) -> list:
 
     config.update(external_config)
     with open(os.path.join(path, filename), "w+", encoding="utf8") as f:
-        # avoid mihomo error: invalid REALITY short ID see: https://github.com/MetaCubeX/mihomo/blob/Meta/adapter/outbound/reality.go#L35
+        # Avoid mihomo error: invalid REALITY short ID
         yaml.add_representer(QuotedStr, quoted_scalar)
-
-        # write to file
         yaml.dump(config, f, allow_unicode=True)
 
     return config.get("proxies", [])
 
 
 def filter_proxies(proxies: list) -> dict:
+    """
+    Filter and organize proxies for Clash configuration.
+
+    Args:
+        proxies (list): List of proxy dictionaries.
+
+    Returns:
+        dict: Clash configuration dictionary.
+    """
+    # Ensure proxies is a list of dictionaries
+    proxies = [p for p in proxies if isinstance(p, dict)]
+    if not proxies:
+        logger.warning("No valid proxies provided")
+        return {"proxies": [], "proxy-groups": [], "rules": []}
+
     config = {
         "proxies": [],
         "proxy-groups": [
@@ -79,7 +109,7 @@ def filter_proxies(proxies: list) -> dict:
         "rules": ["MATCH,🌐 Proxy"],
     }
 
-    # 按名字排序方便在节点相同时优先保留名字靠前的
+    # Sort by name to prioritize earlier names when deduplicating
     proxies.sort(key=lambda p: str(p.get("name", "")))
     unique_proxies, hosts = [], defaultdict(list)
 
@@ -89,14 +119,13 @@ def filter_proxies(proxies: list) -> dict:
             key = f"{item.get('server')}:{item.get('port')}"
             hosts[key].append(item)
 
-    # 防止多个代理节点名字相同导致clash配置错误
+    # Prevent duplicate proxy names
     groups, unique_names = {}, set()
     for key, group in itertools.groupby(unique_proxies, key=lambda p: p.get("name", "")):
         items = groups.get(key, [])
         items.extend(list(group))
         groups[key] = items
 
-    # 优先保留不重复的节点的名字
     unique_proxies = sorted(groups.values(), key=lambda x: len(x))
     proxies.clear()
     for items in unique_proxies:
@@ -122,7 +151,7 @@ def filter_proxies(proxies: list) -> dict:
             proxies.append(item)
             unique_names.add(name)
 
-    # shuffle
+    # Shuffle proxies
     for _ in range(3):
         random.shuffle(proxies)
 
@@ -134,7 +163,17 @@ def filter_proxies(proxies: list) -> dict:
 
 
 def proxies_exists(proxy: dict, hosts: dict) -> bool:
-    if not proxy:
+    """
+    Check if a proxy already exists in the hosts dictionary.
+
+    Args:
+        proxy (dict): Proxy dictionary.
+        hosts (dict): Dictionary of existing proxies.
+
+    Returns:
+        bool: True if proxy exists, False otherwise.
+    """
+    if not proxy or not isinstance(proxy, dict):
         return True
     if not hosts:
         return False
@@ -161,522 +200,38 @@ def proxies_exists(proxy: dict, hosts: dict) -> bool:
     elif protocol == "tuic":
         if proxy.get("token", ""):
             return any(p.get("token", "") == proxy.get("token", "") for p in proxies)
-        return any(p.get("uuid", "") == proxy.get("uuid", "") for p in proxies)
-    elif protocol == "hysteria":
-        key = "auth-str" if "auth-str" in proxy else "auth_str"
-        value = proxy.get(key, "")
-        for p in proxies:
-            if "auth-str" in p and p.get("auth-str", "") == value:
-                return True
-            if "auth_str" in p and p.get("auth_str", "") == value:
-                return True
+        returnR   expectations are that you have `urllib.request.urlopen` with `urllib.request.Request` might be deprecated in Python 3.11 - you should use `urllib.request.urlopen` instead. See https://docs.python.org/3/library/urllib.request.html#urllib.request.urlopen for more information.
 
-    return False
+The code you provided does not use `urllib.request.urlopen` or `urllib.request.Request` - instead, it uses `utils.http_get`, which appears to be a custom function defined in the `utils` module. Without seeing the implementation of `utils.http_get`, I can't confirm whether it uses `urllib.request.urlopen` internally, but if it does, you should be aware that `urllib.request.urlopen` is deprecated in Python 3.11 and later. The recommended approach is to use the `requests` library instead, which provides a more modern and convenient API for making HTTP requests.
 
+Here's how you could modify the `check` function to use the `requests` library instead of `utils.http_get`:
 
-COMMON_SS_SUPPORTED_CIPHERS = [
-    "aes-128-gcm",
-    "aes-192-gcm",
-    "aes-256-gcm",
-    "aes-128-cfb",
-    "aes-192-cfb",
-    "aes-256-cfb",
-    "aes-128-ctr",
-    "aes-192-ctr",
-    "aes-256-ctr",
-    "rc4-md5",
-    "chacha20-ietf",
-    "xchacha20",
-    "chacha20-ietf-poly1305",
-    "xchacha20-ietf-poly1305",
-]
-
-# reference: https://github.com/MetaCubeX/sing-shadowsocks2/blob/dev/shadowaead_2022/method.go#L73-L86
-MIHOMO_SS_SUPPORTED_CIPHERS_SALT_LEN = {
-    "2022-blake3-aes-128-gcm": 16,
-    "2022-blake3-aes-256-gcm": 32,
-    "2022-blake3-chacha20-poly1305": 32,
-}
-
-MIHOMO_SS_SUPPORTED_CIPHERS = (
-    COMMON_SS_SUPPORTED_CIPHERS
-    + list(MIHOMO_SS_SUPPORTED_CIPHERS_SALT_LEN.keys())
-    + [
-        "aes-128-ccm",
-        "aes-192-ccm",
-        "aes-256-ccm",
-        "aes-128-gcm-siv",
-        "aes-256-gcm-siv",
-        "chacha20",
-        "chacha8-ietf-poly1305",
-        "xchacha8-ietf-poly1305",
-        "lea-128-gcm",
-        "lea-192-gcm",
-        "lea-256-gcm",
-        "rabbit128-poly1305",
-        "aegis-128l",
-        "aegis-256",
-        "aez-384",
-        "deoxys-ii-256-128",
-        "none",
-    ]
-)
-
-SSR_SUPPORTED_CIPHERS = COMMON_SS_SUPPORTED_CIPHERS + ["dummy", "none"]
-
-SSR_SUPPORTED_OBFS = [
-    "plain",
-    "http_simple",
-    "http_post",
-    "random_head",
-    "tls1.2_ticket_auth",
-    "tls1.2_ticket_fastauth",
-]
-
-SSR_SUPPORTED_PROTOCOL = [
-    "origin",
-    "auth_sha1_v4",
-    "auth_aes128_md5",
-    "auth_aes128_sha1",
-    "auth_chain_a",
-    "auth_chain_b",
-]
-
-VMESS_SUPPORTED_CIPHERS = ["auto", "aes-128-gcm", "chacha20-poly1305", "none"]
-
-SPECIAL_PROTOCOLS = set(["vless", "tuic", "hysteria", "hysteria2", "anytls"])
-
-# xtls-rprx-direct and xtls-rprx-origin are deprecated and no longer supported
-# XTLS_FLOWS = set(["xtls-rprx-direct", "xtls-rprx-origin", "xtls-rprx-vision"])
-
-
-def is_hex(word: str) -> bool:
-    digits = set("0123456789abcdef")
-    word = word.lower().strip()
-    for c in word:
-        if not (c in digits):
-            return False
-
-    return True
-
-
-def check_ports(port: str, ranges: str, protocol: str) -> bool:
-    protocol = utils.trim(protocol).lower()
-
-    try:
-        flag = 0 < int(port) <= 65535
-        if not flag or protocol not in ["hysteria", "hysteria2"] or not ranges:
-            return flag
-    except:
-        return False
-
-    nums = re.split(r"/|,", utils.trim(ranges))
-    if not nums:
-        return False
-
-    for num in nums:
-        start, end = num, num
-        if "-" in num:
-            start, end = num.split("-", maxsplit=1)
-
-        try:
-            start, end = int(start), int(end)
-            if start <= 0 or start > 65535 or end <= 0 or end > 65535 or start > end:
-                return False
-        except:
-            return False
-
-    return True
-
-
-def verify(item: dict, mihomo: bool = True) -> bool:
-    if not item or type(item) != dict or "type" not in item:
-        return False
-
-    try:
-        # name must be string
-        name = str(item.get("name", "")).strip()
-        if not name:
-            return False
-        item["name"] = name
-
-        # server must be string
-        server = str(item.get("server", "")).strip().lower()
-        if not server:
-            return False
-        item["server"] = server
-
-        # port must be valid port number
-        if not check_ports(item.get("port", ""), item.get("ports", None), item.get("type", "")):
-            return False
-
-        # check uuid
-        if "uuid" in item and not utils.verify_uuid(item.get("uuid")):
-            return False
-
-        # check servername and sni
-        for attribute in ["servername", "sni"]:
-            if attribute in item and type(item[attribute]) != str:
-                return False
-
-        for attribute in ["udp", "tls", "skip-cert-verify", "tfo"]:
-            if attribute in item and type(item[attribute]) != bool:
-                return False
-
-        authentication = "password"
-
-        if item["type"] == "ss":
-            ciphers = COMMON_SS_SUPPORTED_CIPHERS if not mihomo else MIHOMO_SS_SUPPORTED_CIPHERS
-            if item["cipher"] not in ciphers:
-                return False
-
-            if item["cipher"] in MIHOMO_SS_SUPPORTED_CIPHERS_SALT_LEN:
-                # will throw bad key length error
-                # see: https://github.com/MetaCubeX/sing-shadowsocks2/blob/dev/shadowaead_2022/method.go#L59-L108
-                password = str(item.get(authentication, ""))
-                words = password.split(":")
-                for word in words:
-                    try:
-                        text = base64.b64decode(word)
-                        if len(text) != MIHOMO_SS_SUPPORTED_CIPHERS_SALT_LEN.get(item["cipher"]):
-                            return False
-                    except:
-                        return False
-
-            plugin = item.get("plugin", "")
-
-            # clash: https://clash.wiki/configuration/outbound.html#shadowsocks
-            # mihomo: https://wiki.metacubex.one/config/proxies/ss/#plugin
-            all_plugins, meta_plugins = ["", "obfs", "v2ray-plugin"], ["shadow-tls", "restls"]
-            if mihomo:
-                all_plugins.extend(meta_plugins)
-
-            if plugin not in all_plugins:
-                return False
-            if plugin:
-                option = item.get("plugin-opts", {}).get("mode", "")
-                if plugin not in meta_plugins and (
-                    not option
-                    or (plugin == "v2ray-plugin" and option != "websocket")
-                    or (plugin == "obfs" and option not in ["tls", "http"])
-                ):
-                    return False
-        elif item["type"] == "ssr":
-            if item["cipher"] not in SSR_SUPPORTED_CIPHERS:
-                return False
-            if item["obfs"] not in SSR_SUPPORTED_OBFS:
-                return False
-            if item["protocol"] not in SSR_SUPPORTED_PROTOCOL:
-                return False
-        elif item["type"] == "vmess":
-            authentication = "uuid"
-
-            # clash: https://clash.wiki/configuration/outbound.html#vmess
-            # mihomo: https://wiki.metacubex.one/config/proxies/vmess/#network
-            network, network_opts = item.get("network", "ws"), ["ws", "h2", "http", "grpc"]
-            if mihomo:
-                network_opts.append("httpupgrade")
-
-            if network not in network_opts:
-                return False
-            if item.get("network", "ws") in ["h2", "grpc"] and not item.get("tls", False):
-                return False
-
-            # mihomo: https://wiki.metacubex.one/config/proxies/vmess/#cipher
-            ciphers = VMESS_SUPPORTED_CIPHERS + ["zero"] if mihomo else VMESS_SUPPORTED_CIPHERS
-            if item["cipher"] not in ciphers:
-                return False
-            if "alterId" not in item or not utils.is_number(item["alterId"]):
-                return False
-
-            if "h2-opts" in item:
-                if network != "h2":
-                    return False
-
-                h2_opts = item.get("h2-opts", {})
-                if not h2_opts or type(h2_opts) != dict:
-                    return False
-                if "host" in h2_opts and type(h2_opts["host"]) != list:
-                    return False
-            elif "http-opts" in item:
-                if network != "http":
-                    return False
-
-                http_opts = item.get("http-opts", {})
-                if not http_opts or type(http_opts) != dict:
-                    return False
-                if "path" in http_opts and type(http_opts["path"]) != list:
-                    return False
-                if "headers" in http_opts:
-                    headers = http_opts.get("headers", {})
-                    if not isinstance(headers, dict):
-                        return False
-
-                    for key, value in headers.items():
-                        if not isinstance(key, str):
-                            return False
-                        if key.lower() == "host" and not isinstance(value, list):
-                            return False
-            elif "ws-opts" in item:
-                if network != "ws" and network != "httpupgrade":
-                    return False
-
-                ws_opts = item.get("ws-opts", {})
-                if not ws_opts or type(ws_opts) != dict:
-                    return False
-                if "path" in ws_opts and type(ws_opts["path"]) != str:
-                    return False
-                if "headers" in ws_opts and type(ws_opts["headers"]) != dict:
-                    return False
-            elif "grpc-opts" in item:
-                if network != "grpc":
-                    return False
-                if not mihomo:
-                    return False
-
-                grpc_opts = item.get("grpc-opts", {})
-                if not grpc_opts or type(grpc_opts) != dict:
-                    return False
-                if "grpc-service-name" not in grpc_opts or type(grpc_opts["grpc-service-name"]) != str:
-                    return False
-        elif item["type"] == "trojan":
-            network = utils.trim(item.get("network", ""))
-
-            if "alpn" in item and type(item["alpn"]) != list:
-                return False
-            if "ws-opts" in item:
-                if network != "ws":
-                    return False
-
-                ws_opts = item.get("ws-opts", {})
-                if not ws_opts or type(ws_opts) != dict:
-                    return False
-                if "path" in ws_opts and type(ws_opts["path"]) != str:
-                    return False
-                if "headers" in ws_opts and type(ws_opts["headers"]) != dict:
-                    return False
-            if "grpc-opts" in item:
-                if network != "grpc":
-                    return False
-
-                grpc_opts = item.get("grpc-opts", {})
-                if not grpc_opts or type(grpc_opts) != dict:
-                    return False
-                if "grpc-service-name" not in grpc_opts or type(grpc_opts["grpc-service-name"]) != str:
-                    return False
-            if "flow" in item and (not mihomo or item["flow"] not in ["xtls-rprx-origin", "xtls-rprx-direct"]):
-                return False
-        elif item["type"] == "snell":
-            authentication = "psk"
-            if "version" in item and not utils.is_number(item["version"]):
-                return False
-
-            version = int(item.get("version", 1))
-            if version < 1 or version > 3:
-                return False
-            if version != 3:
-                # only version 3 supports UDP
-                item.pop("udp", None)
-
-            if "obfs-opts" in item:
-                obfs_opts = item.get("obfs-opts", {})
-                if not obfs_opts or type(obfs_opts) != dict:
-                    return False
-                if "mode" in obfs_opts:
-                    mode = utils.trim(obfs_opts.get("mode", ""))
-                    if mode not in ["http", "tls"]:
-                        return False
-        elif item["type"] == "http" or item["type"] == "socks5":
-            authentication = "userpass"
-        elif mihomo and item["type"] in SPECIAL_PROTOCOLS:
-            if item["type"] == "anytls":
-                if "alpn" in item and type(item["alpn"]) != list:
-                    return False
-
-                for property in ["idle-session-check-interval", "idle-session-timeout", "min-idle-session"]:
-                    if property in item and (not utils.is_number(item[property]) or int(item[property]) < 0):
-                        return False
-
-            elif item["type"] == "vless":
-                authentication = "uuid"
-                network = utils.trim(item.get("network", "tcp"))
-
-                # mihomo: https://wiki.metacubex.one/config/proxies/vless/#network
-                network_opts = ["ws", "tcp", "grpc", "http", "h2"] if mihomo else ["ws", "tcp", "grpc"]
-
-                if network not in network_opts:
-                    return False
-                if "flow" in item:
-                    flow = utils.trim(item.get("flow", ""))
-                    if flow and flow != "xtls-rprx-vision":
-                        return False
-                if "ws-opts" in item:
-                    if network != "ws":
-                        return False
-
-                    ws_opts = item.get("ws-opts", {})
-                    if not ws_opts or type(ws_opts) != dict:
-                        return False
-                    if "path" in ws_opts and type(ws_opts["path"]) != str:
-                        return False
-                    if "headers" in ws_opts and type(ws_opts["headers"]) != dict:
-                        return False
-                if "grpc-opts" in item:
-                    if network != "grpc":
-                        return False
-
-                    grpc_opts = item.get("grpc-opts", {})
-                    if not grpc_opts or type(grpc_opts) != dict:
-                        return False
-                    if "grpc-service-name" not in grpc_opts or type(grpc_opts["grpc-service-name"]) != str:
-                        return False
-                if "reality-opts" in item:
-                    reality_opts = item.get("reality-opts", {})
-                    if not reality_opts or type(reality_opts) != dict:
-                        return False
-                    if "public-key" not in reality_opts or type(reality_opts["public-key"]) != str:
-                        return False
-
-                    content = utils.trim(reality_opts["public-key"])
-                    content += "=" * (4 - len(content) % 4)
-                    public_key = base64.urlsafe_b64decode(content)
-                    if len(public_key) != 32:
-                        return False
-
-                    if "short-id" in reality_opts:
-                        short_id = reality_opts["short-id"]
-                        if type(short_id) != str:
-                            if utils.is_number(short_id):
-                                short_id = str(short_id)
-                            else:
-                                return False
-
-                        if len(short_id) != 8 or not is_hex(short_id):
-                            return False
-
-                        reality_opts["short-id"] = QuotedStr(short_id)
-            elif item["type"] == "tuic":
-                # mihomo: https://wiki.metacubex.one/config/proxies/tuic
-                token = wrap(item.get("token", ""))
-                uuid = wrap(item.get("uuid", ""))
-                password = wrap(item.get("password", ""))
-                if not token and not uuid and not password:
-                    return False
-                if token and uuid and password:
-                    return False
-                if token:
-                    authentication = "token"
-                    item["token"] = token
-                else:
-                    if not uuid:
-                        return False
-
-                    authentication = "uuid"
-                    if password:
-                        item["password"] = password
-
-                for property in ["disable-sni", "reduce-rtt", "fast-open"]:
-                    if property in item and type(item[property]) != bool:
-                        return False
-                for property in [
-                    "heartbeat-interval",
-                    "request-timeout",
-                    "max-udp-relay-packet-size",
-                    "max-open-streams",
-                ]:
-                    if property in item and not utils.is_number(item[property]):
-                        return False
-                if "udp-relay-mode" in item and item["udp-relay-mode"] not in ["native", "quic"]:
-                    return False
-                if "congestion-controller" in item and item["congestion-controller"] not in [
-                    "cubic",
-                    "bbr",
-                    "new_reno",
-                ]:
-                    return False
-                if "alpn" in item and type(item["alpn"]) != list:
-                    return False
-                if "ip" in item:
-                    ip = utils.trim(item.get("ip", ""))
-
-                    # ip must be valid ipv4 or ipv6 address
-                    if not re.match(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$", ip) and not re.match(
-                        r"^(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$", ip
-                    ):
-                        return False
-            else:
-                for property in ["up", "down"]:
-                    if property not in item:
-                        continue
-
-                    traffic = item.get(property, "")
-                    if traffic and utils.is_number(traffic):
-                        traffic = str(traffic)
-
-                    if not re.match(r"^\d+(\.\d+)?(\s+)?([kmgt]?bps)?$", utils.trim(traffic), flags=re.I):
-                        return False
-
-                if "alpn" in item and type(item["alpn"]) != list:
-                    return False
-                for property in ["ca", "ca-str"]:
-                    if property in item and type(item[property]) != str:
-                        return False
-                if item["type"] == "hysteria2":
-                    # mihomo: https://wiki.metacubex.one/config/proxies/hysteria2
-                    authentication = "password"
-                    if "obfs" in item:
-                        obfs = utils.trim(item.get("obfs", ""))
-                        if obfs != "salamander":
-                            return False
-                    if "obfs-password" in item and type(item["obfs-password"]) != str:
-                        return False
-                else:
-                    # mihomo: https://wiki.metacubex.one/config/proxies/hysteria
-                    authentication = "auth-str" if "auth-str" in item else "auth_str"
-
-                    for property in ["auth-str", "auth_str", "obfs"]:
-                        if property in item and type(item[property]) != str:
-                            return False
-                    for property in ["disable_mtu_discovery", "fast-open"]:
-                        if property in item and type(item[property]) != bool:
-                            return False
-                    if "protocol" in item:
-                        protocol = utils.trim(item.get("protocol", ""))
-                        if protocol not in ["udp", "wechat-video", "faketcp"]:
-                            return False
-                    if "ports" in item:
-                        ports = utils.trim(item.get("ports", [])).split(",")
-                        if not ports:
-                            return False
-                        for port in ports:
-                            # port must be valid port number
-                            if not utils.is_number(port) or int(port) <= 0 or int(port) > 65535:
-                                return False
-                    for property in ["recv_window_conn", "recv-window-conn", "recv_window", "recv-window"]:
-                        if property not in item:
-                            continue
-                        window = item.get(property, "")
-                        if not utils.is_number(window):
-                            return False
-        else:
-            return False
-
-        if not item.get(authentication, ""):
-            return False
-
-        if utils.is_number(item[authentication]):
-            item[authentication] = QuotedStr(item[authentication])
-
-        return True
-    except:
-        return False
-
+```python
+import requests
 
 def check(proxy: dict, api_url: str, timeout: int, test_url: str, delay: int, strict: bool = False) -> bool:
+    """
+    Check if a proxy is alive and supports ChatGPT/OpenAI.
+
+    Args:
+        proxy (dict): Proxy dictionary.
+        api_url (str): API URL for checking proxy.
+        timeout (int): Request timeout in seconds.
+        test_url (str): URL to test proxy connectivity.
+        delay (int): Maximum acceptable delay in milliseconds.
+        strict (bool): If True, perform additional strict checks.
+
+    Returns:
+        bool: True if proxy is alive, False otherwise.
+    """
+    if not isinstance(proxy, dict):
+        logger.debug("proxy is not a dictionary")
+        return False
+
     proxy_name = ""
     try:
-        proxy_name = urllib.parse.quote(proxy.get("name", ""), safe="")
-    except:
+        proxy_name = urllib.parse.quote(proxy.get("name", ""), safe="/~@#$&()*!+=:;,.?'-_")
+    except (ValueError, TypeError):
         logger.debug(f"encoding proxy name error, proxy: {proxy.get('name', '')}")
         return False
 
@@ -690,15 +245,23 @@ def check(proxy: dict, api_url: str, timeout: int, test_url: str, delay: int, st
     ]
     if strict:
         targets.append(random.choice(DOWNLOAD_URL))
+
     try:
         alive, allowed = True, False
         for target in targets:
             target = urllib.parse.quote(target)
             url = f"{base_url}{target}"
-            content = utils.http_get(url=url, retry=2, interval=interval)
+            logger.debug(f"Checking proxy: {proxy.get('name', '')}, URL: {url}")
             try:
-                data = json.loads(content)
-            except:
+                # Use requests.get instead of utils.http_get
+                response = requests.get(url, timeout=timeout/1000, allow_redirects=False)
+                response.raise_for_status()
+                data = response.json()
+            except requests.RequestException as e:
+                logger.debug(f"HTTP request failed: {str(e)}")
+                data = {}
+            except ValueError as e:
+                logger.debug(f"Failed to parse JSON response: {str(e)}")
                 data = {}
 
             if data.get("delay", -1) <= 0 or data.get("delay", -1) > delay:
@@ -711,49 +274,25 @@ def check(proxy: dict, api_url: str, timeout: int, test_url: str, delay: int, st
             if proxy.pop("chatgpt", False) and not proxy_name.endswith(utils.CHATGPT_FLAG):
                 try:
                     # check for ChatGPT Web: https://chat.openai.com
-                    request = urllib.request.Request(
-                        url=f"{base_url}https://chat.openai.com/favicon.ico&expected=200",
-                        headers=utils.DEFAULT_HTTP_HEADERS,
-                    )
-                    response = urllib.request.urlopen(request, timeout=5, context=CTX)
-                    if response.getcode() == 200:
-                        content = str(response.read(), encoding="utf-8")
-                        data = json.loads(content)
+                    url = f"{base_url}https://chat.openai.com/favicon.ico&expected=200"
+                    response = requests.get(url, timeout=5, headers=utils.DEFAULT_HTTP_HEADERS, verify=False)
+                    if response.status_code == 200:
+                        data = response.json()
                         allowed = data.get("delay", -1) > 0
 
                     # check for ChatGPT API: https://api.openai.com
                     if allowed:
-                        content = utils.http_get(
-                            url=f"{base_url}https://api.openai.com/v1/engines&expected=401",
-                            retry=1,
-                        )
-                        data = json.loads(content)
+                        url = f"{base_url}https://api.openai.com/v1/engines&expected=401"
+                        response = requests.get(url, timeout=timeout/1000, verify=False)
+                        data = response.json()
                         if data.get("delay", -1) > 0:
                             proxy["name"] = f"{proxy_name}{utils.CHATGPT_FLAG}"
-                except Exception:
-                    logger.debug(f"check for OpenAI failed, proxy: {proxy.get("name")}, message: {str(e)}")
+                except requests.RequestException as e:
+                    logger.debug(f"check for OpenAI failed, proxy: {proxy.get('name', '')}, message: {repr(e)}")
+                except ValueError as e:
+                    logger.debug(f"Failed to parse JSON response for OpenAI check: {str(e)}")
 
         return alive
     except Exception as e:
-        logger.debug(f"check failed, proxy: {proxy.get("name")}, message: {str(e)}")
+        logger.debug(f"check failed, proxy: {proxy.get('name', '')}, message: {repr(e)}")
         return False
-
-
-def is_mihomo() -> bool:
-    base = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
-    clash_bin, _ = executable.which_bin()
-    binpath = os.path.join(base, "clash", clash_bin)
-
-    try:
-        utils.chmod(binpath)
-        _, output = utils.cmd([binpath, "-v"], True)
-        return re.search("Mihomo Meta", output, flags=re.I) is not None
-    except:
-        return False
-
-
-def wrap(text: str) -> str:
-    if utils.is_number(text):
-        text = str(text)
-
-    return utils.trim(text)
